@@ -105,6 +105,8 @@ Linux CUDA 环境搭建参考: <https://zhuanlan.zhihu.com/p/674972886>
 
 1. 将 `wav2lip256.pth` 拷贝到项目的 `models/` 目录下，重命名为 `wav2lip.pth`
 2. 将 `wav2lip256_avatar1.tar.gz` 解压后整个文件夹拷贝到 `data/avatars/` 目录下
+3. 若要自己生成/重建头像，还需人脸检测权重 `s3fd.pth`（约 86MB），
+   下载地址与校验方式见 [模型权重下载与校验](docs/model-weights.md)
 
 ### 2.2 启动服务
 

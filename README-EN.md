@@ -102,6 +102,8 @@ Linux CUDA environment setup: <https://zhuanlan.zhihu.com/p/674972886>
 
 1. Copy `wav2lip256.pth` to the project's `models/` directory and rename it to `wav2lip.pth`
 2. Extract `wav2lip256_avatar1.tar.gz` and copy the entire extracted folder to `data/avatars/`
+3. To generate or rebuild avatars yourself, you also need the face-detection weight `s3fd.pth` (about 86MB).
+   See [Model Weights: Download & Verify](docs/model-weights.md) for download links and checksums
 
 ### 2.2 Start the Server
 
