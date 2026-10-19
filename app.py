@@ -105,6 +105,19 @@ async def offer(request):
 async def whep(request):
     return await rtc_manager.handle_whep(request)
 
+async def close_session(request):
+    """显式释放会话（客户端关闭页面 / 关闭 LiveTalking 开关时调用）。"""
+    try:
+        params = await request.json()
+    except Exception:
+        params = {}
+    sessionid = str(params.get("sessionid", "") or request.query.get("sessionid", ""))
+    if not sessionid:
+        return web.json_response({"code": -1, "msg": "sessionid is required"})
+    existed = await rtc_manager.release_session(sessionid)
+    logger.info("close_session sessionid=%s existed=%s", sessionid, existed)
+    return web.json_response({"code": 0, "msg": "ok"})
+
 async def on_shutdown(app):
     await rtc_manager.shutdown()
 
@@ -178,6 +191,7 @@ def main():
 
     appasync.on_shutdown.append(on_shutdown)
     appasync.router.add_post("/offer", offer)
+    appasync.router.add_post("/session/close", close_session)
     appasync.router.add_get("/record/{sessionid}", download_record)
 
     # 注册 server/routes.py 中的通用 API 路由
@@ -208,6 +222,8 @@ def main():
         loop.run_until_complete(runner.setup())
         site = web.TCPSite(runner, '0.0.0.0', opt.listenport)
         loop.run_until_complete(site.start())
+        # 启动后台回收：清理断开/残留的 WebRTC 会话，避免顶满 max_session
+        rtc_manager.start_reaper()
         if opt.transport=='rtcpush':
             for k in range(opt.max_session):
                 push_url = opt.push_url
