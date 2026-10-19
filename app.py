@@ -73,6 +73,31 @@ def randN(N)->int:
     max = pow(10, N)
     return random.randint(min, max - 1)
 
+# 头像缓存上限：一个 wav2lip 头像常驻约 150MB（全帧 PNG + 人脸裁剪），
+# 前端可以按会话切换 avatar，切太多会吃光内存，因此只保留
+# 「启动默认头像 + 活跃会话在用的 + 最近加载的」，总数不超过 MAX_CACHED_AVATARS。
+MAX_CACHED_AVATARS = 3
+
+
+def _trim_avatar_cache(keep_id: str = ""):
+    if len(global_avatars) <= MAX_CACHED_AVATARS:
+        return
+    in_use = set()
+    for s in session_manager.sessions.values():
+        aid = getattr(getattr(s, "opt", None), "avatar_id", None)
+        if aid:
+            in_use.add(aid)
+    protected = set(in_use) | {opt.avatar_id}
+    if keep_id:
+        protected.add(keep_id)
+    for aid in list(global_avatars.keys()):
+        if len(global_avatars) <= MAX_CACHED_AVATARS:
+            break
+        if aid not in protected:
+            global_avatars.pop(aid, None)
+            logger.info("Evicted cached avatar: %s", aid)
+
+
 def build_avatar_session(sessionid:str, params:dict)->BaseAvatar:
     opt_this = copy.deepcopy(opt)
     opt_this.sessionid = sessionid
@@ -97,6 +122,7 @@ def build_avatar_session(sessionid:str, params:dict)->BaseAvatar:
         opt_this.customopt = json.loads(custom_config)
 
     avatar_session = registry.create("avatar", opt.model, opt=opt_this, model=model, avatar=avatar_this)
+    _trim_avatar_cache(avatar_id)
     return avatar_session
 
 async def offer(request):

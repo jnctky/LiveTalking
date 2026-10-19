@@ -3,6 +3,8 @@
 ###############################################################################
 
 import json
+import os
+import re
 import asyncio
 from aiohttp import web
 
@@ -200,6 +202,74 @@ async def admin_config(request):
         return json_error(str(e))
 
 
+AVATAR_ROOT = os.path.join("data", "avatars")
+_AVATAR_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _avatar_dir(avatar_id: str):
+    """把 avatar_id 解析成目录路径；非法 id 或目录不存在返回 None（防路径穿越）。"""
+    if not avatar_id or not _AVATAR_ID_RE.match(avatar_id) or avatar_id in (".", ".."):
+        return None
+    path = os.path.join(AVATAR_ROOT, avatar_id)
+    return path if os.path.isdir(path) else None
+
+
+def _frame_names(avatar_dir: str):
+    full = os.path.join(avatar_dir, "full_imgs")
+    if not os.path.isdir(full):
+        return []
+    return sorted(
+        n for n in os.listdir(full)
+        if n.lower().endswith((".png", ".jpg", ".jpeg"))
+    )
+
+
+async def list_avatars(request):
+    """列出可用头像，供前端下拉选择。
+
+    切换方式：`POST /offer` 的 body 里带 `{"avatar": "<id>"}`，
+    服务端会按需加载并缓存，无需重启进程或改 `--avatar_id`。
+    """
+    try:
+        avatars = []
+        if os.path.isdir(AVATAR_ROOT):
+            for name in sorted(os.listdir(AVATAR_ROOT)):
+                avatar_dir = _avatar_dir(name)
+                if not avatar_dir:
+                    continue
+                frames = _frame_names(avatar_dir)
+                if not frames:
+                    continue  # 跳过不完整的目录（没有 full_imgs 帧）
+                avatars.append({
+                    "id": name,
+                    "frames": len(frames),
+                    "seconds": round(len(frames) / 25.0, 2),
+                    "preview": f"/api/avatars/{name}/preview",
+                })
+        opt = request.app.get("opt")
+        return json_ok(data={
+            "avatars": avatars,
+            "default": getattr(opt, "avatar_id", "") if opt else "",
+        })
+    except Exception as e:
+        logger.exception('list_avatars exception:')
+        return json_error(str(e))
+
+
+async def avatar_preview(request):
+    """返回头像首帧，用作选择器缩略图。"""
+    avatar_dir = _avatar_dir(request.match_info.get("avatar_id", ""))
+    if not avatar_dir:
+        raise web.HTTPNotFound()
+    frames = _frame_names(avatar_dir)
+    if not frames:
+        raise web.HTTPNotFound()
+    return web.FileResponse(
+        os.path.join(avatar_dir, "full_imgs", frames[0]),
+        headers={"Cache-Control": "public, max-age=60"},
+    )
+
+
 async def admin_sessions(request):
     """Admin: 获取活跃的会话及其配置"""
     try:
@@ -252,6 +322,8 @@ def setup_routes(app):
     app.router.add_post("/is_speaking", is_speaking)
     app.router.add_get("/api/admin/config", admin_config)
     app.router.add_get("/api/admin/sessions", admin_sessions)
+    app.router.add_get("/api/avatars", list_avatars)
+    app.router.add_get("/api/avatars/{avatar_id}/preview", avatar_preview)
     app.router.add_get('/sse', sse_handler)
 
     # ── Local ASR endpoint (SenseVoice/FunASR) ── Issue #604 ──
