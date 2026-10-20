@@ -128,8 +128,15 @@ airi 侧在「设置 → 角色模型 → LiveTalking → 头像」下拉里选�
 
 | 片段类型 | 时长 | 帧数（24fps 生成） | 内容要求 |
 |---|---|---|---|
-| `idle` 待机 | 2~3s | 56（17k+5 网格） | 呼吸/眨眼/微侧倾/手指小动作，幅度小 |
-| `talk` 对话 | 5~6s | 124 | 情绪靠身体/头/眉眼表达，**嘴保持闭合** |
+| `idle` 待机（小） | 2~3s | 56（17k+5 网格） | 呼吸/眨眼/微侧倾/手指小动作，幅度小 |
+| `idle` 待机（大，v2） | ~5s | 124 | 手部动作：挥手/撩发/整袖口，幅度大但收回到起点姿态 |
+| `talk` 对话（短） | 5~6s | 124 | 情绪靠身体/头/眉眼表达，**嘴保持闭合** |
+| `talk` 对话（长，v2） | ~18.6s | 447 | 两段手势乐句+中段回中性停顿（出口帧位置），覆盖 10s+ 整段回答 |
+
+**长 talk 片段（v2）为什么要中段停顿**：新句子切段和"回待机"都要等出口帧。
+447 帧若出口帧在片尾，短回答结束后角色会无声比划到结尾；把出口帧定在中段
+停顿（`exit_frac: 0.5`，≈9s），长回答整段基本由一条 clip 覆盖（拼接次数
+3-4 次 → 1-2 次），短回答 speech 结束最多等 ~9s 就能切出。
 
 为什么 talk 片段嘴也要闭合：静默期服务端直接显示素材原帧不推理，说话期嘴部
 由 wav2lip 重绘。素材本身在说话会导致"无声张嘴"和口型糊掉。
@@ -137,17 +144,20 @@ airi 侧在「设置 → 角色模型 → LiveTalking → 头像」下拉里选�
 ### 生成流程
 
 ```bash
-# 1) 定义片段：编辑 my_tools/clips_v1.py（BASE 人物场景 + 每段 motion + length）
+# 1) 定义片段：编辑 my_tools/clips_v1.py / clips_v2.py
+#    （BASE 人物场景 + 每段 motion + length；长 talk 可加 exit_frac 显式出口比例）
 #    起点帧取自动作素材的第 0 帧，建议放 my_tools/image/clips/_anchor.png
 # 2) 批量生成（每段是一段首尾同帧的 I2V，同 seed 保证人物一致）
-PYTHONPATH= .venv/Scripts/python.exe my_tools/gen_clip_set.py
+PYTHONPATH= .venv/Scripts/python.exe my_tools/gen_clip_set.py --clips-module clips_v2
 # 3) 拼接 → genavatar → 写 clips.json
-PYTHONPATH= .venv/Scripts/python.exe my_tools/build_clip_avatar.py --avatar-id <avatar_id>
+PYTHONPATH= .venv/Scripts/python.exe my_tools/build_clip_avatar.py \
+    --avatar-id <avatar_id> --clips-module clips_v2
 ```
 
 `build_clip_avatar.py` 会自动算每段的**出口帧**（exit）：动作已回到中性、可安全
 切出的位置。idle 片段动作幅度小、差异曲线全程低，固定取 60%；talk 片段按与起点帧
-的差异曲线取尾部回归点（实测约 65%）。
+的差异曲线取尾部回归点（实测约 65%）。片段定义里显式给 `exit_frac`（如长 talk
+的中段停顿 0.5）时优先于自动检测。
 
 ### clips.json 与播放规则
 
@@ -183,7 +193,8 @@ node my_tools/airi_cafe_check.js <avatar_id>   # 浏览器端到端：下拉/切
 
 ### 扩展方向
 
-- 加片段：往 `clips_v1.py` 追加条目 → 重跑 gen_clip_set（只生成新增的，用 `--only`）→ 重跑 build
+- 加片段：往 `clips_v2.py` 的 `CLIPS_V2` 追加条目（v2 池 = v1 全部 + 新增）→
+  重跑 gen_clip_set（只生成新增的，用 `--only`）→ 重跑 build
 - 按语义选情绪：`clips.json` 已有 `emotion` 字段，接 LLM 标签后传给调度器即可（二期）
 - 按句切音频：让每句 3~6s，与 talk 片段天然对齐，避免循环感（二期）
 

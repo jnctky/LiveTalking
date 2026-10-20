@@ -11,6 +11,7 @@ my_tools/image/clips/<name>.mp4，并对每段跑一次轻量检查（帧数/尺
   my_tools/log/_clipset.log
 """
 import argparse
+import importlib
 import os
 import shutil
 import subprocess
@@ -20,7 +21,6 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from clips_v1 import ANCHOR, BASE, CLIPS, TAIL  # noqa: E402
 import paths  # noqa: E402
 
 MY = os.path.dirname(os.path.abspath(__file__))
@@ -94,9 +94,16 @@ def check(dst, want_len):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default=None, help="只生成指定片段, 逗号分隔")
+    ap.add_argument("--clips-module", default="clips_v2",
+                    help="片段定义模块名（须提供 BASE/TAIL/CLIPS/ANCHOR）")
     ap.add_argument("--width", type=int, default=W)
     ap.add_argument("--height", type=int, default=H)
     args = ap.parse_args()
+
+    clips_mod = importlib.import_module(args.clips_module)
+    global BASE, TAIL
+    BASE, TAIL = clips_mod.BASE, clips_mod.TAIL
+    CLIPS = clips_mod.CLIPS
 
     os.makedirs(CLIP_DIR, exist_ok=True)
     todo = [c for c in CLIPS if not args.only or c["name"] in args.only.split(",")]

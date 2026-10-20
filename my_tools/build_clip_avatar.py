@@ -13,6 +13,7 @@
         --avatar-id cafe_clips [--clips-dir my_tools/image/clips]
 """
 import argparse
+import importlib
 import os
 import shutil
 import subprocess
@@ -22,7 +23,6 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from clips_v1 import CLIPS  # noqa: E402
 import paths  # noqa: E402
 
 MY = os.path.dirname(os.path.abspath(__file__))
@@ -36,13 +36,19 @@ def log(m):
     print(m, flush=True)
 
 
-def exit_frame(frames, anchor, clip_type):
+def exit_frame(frames, anchor, clip_type, exit_frac=None):
     """出口帧: 动作已回到中性、可安全切出的位置。
 
+    exit_frac: 片段定义里显式给定的出口比例（长 talk 片段的中段回中性停顿处），
+    优先于自动检测。
     idle: 动作幅度小、任意帧都接近中性 => 固定 60% 处, 压低说话切入延迟
     talk: 与起点帧的差异曲线, 尾部连续低差异区起点(动作演完的位置)
     """
     n = len(frames)
+    if exit_frac is not None:
+        ex = max(1, min(int(n * float(exit_frac)), n - 3))
+        log(f"    显式 exit_frac={exit_frac} -> {ex}")
+        return ex
     if clip_type == "idle":
         log(f"    idle 片段: exit 取 60% -> {int(n * 0.6)}")
         return max(1, int(n * 0.6))
@@ -64,9 +70,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--avatar-id", default="cafe_clips")
     ap.add_argument("--clips-dir", default=os.path.join(MY, "image", "clips"))
+    ap.add_argument("--clips-module", default="clips_v1",
+                    help="片段定义模块名（须提供 CLIPS，name/type/emotion/exit_frac）")
     ap.add_argument("--fps", type=int, default=25)
     ap.add_argument("--skip-genavatar", action="store_true")
     args = ap.parse_args()
+
+    clips_mod = importlib.import_module(args.clips_module)
+    CLIPS = clips_mod.CLIPS
 
     anchor = cv2.imread(ANCHOR)
     assert anchor is not None, f"读不到起点帧 {ANCHOR}"
@@ -87,7 +98,7 @@ def main():
         if fr[0].shape != anchor.shape:
             fr = [cv2.resize(f, (anchor.shape[1], anchor.shape[0])) for f in fr]
         log(f"  {c['name']}: {len(fr)} 帧")
-        ex = exit_frame(fr, anchor, c["type"])
+        ex = exit_frame(fr, anchor, c["type"], c.get("exit_frac"))
         plan.append({"name": c["name"], "type": c["type"],
                      "emotion": c.get("emotion", ""),
                      "start": offset, "end": offset + len(fr), "exit": offset + ex})
