@@ -50,6 +50,38 @@ PROMPT_NATURAL = (
 
 PROMPTS = {"anim": PROMPT_ANIM, "natural": PROMPT_NATURAL}
 
+# ---- 插入式微动作 (gesture clips) ----
+# 设计要求: 同一角色/场景/光位; 起止都回到中性姿态(配合 first==last frame),
+# 这样插回主循环时首尾帧与主循环基准姿态一致, 过渡只需很短 crossfade。
+_BASE = (
+    "integrated_multimodal_description: Photorealistic studio portrait video, static locked camera. "
+    "[Shot 1] A professional young Chinese woman with black hair tied back, wearing a navy blue blazer "
+    "and a white top, stands centered against a plain dark studio background. She faces the camera "
+    "with a calm, gentle closed-lip smile. "
+)
+_TAIL = (
+    " Her mouth stays closed, no speech, no talking. Her arms stay relaxed out of frame, her hands "
+    "never enter the shot. Her hair and clothing follow her head and body motion naturally. "
+    "Consistent face, consistent lighting, no camera movement, no zoom, no cuts."
+)
+
+# 点头: 两次缓慢自然的点头后回到静止中性
+PROMPT_NOD = _BASE + (
+    "She gives two slow, gentle, natural nods of her head while keeping eye contact with the camera, "
+    "then returns to a still, neutral head position and holds it at the end of the shot. "
+    "Her shoulders and chest rise and fall with relaxed breathing, and she blinks once naturally."
+) + _TAIL
+
+# 前倾强调: 上身微微前倾强调, 停一下, 再回正直立
+PROMPT_LEAN = _BASE + (
+    "She leans her upper body slightly forward toward the camera as if gently emphasizing a point, "
+    "holds the lean briefly, then returns upright to her neutral standing posture and holds it at the "
+    "end of the shot. Her head keeps facing the camera, her shoulders stay relaxed, and she breathes "
+    "naturally."
+) + _TAIL
+
+PROMPTS.update({"nod": PROMPT_NOD, "lean": PROMPT_LEAN})
+
 def prepare_image():
     img = cv2.imread(SRC, cv2.IMREAD_UNCHANGED)
     assert img is not None, f"读不到源图 {SRC}"
@@ -123,7 +155,7 @@ def main():
     global ARGS
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--style", choices=sorted(PROMPTS), default="anim",
-                    help="动效风格: anim=原眨眼版, natural=眨眼+自然肢体动作")
+                    help="动效风格: anim=眨眼, natural=眨眼+肢体, nod=点头微动作, lean=前倾强调")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--length", type=int, default=LENGTH, help="帧数, 需满足 17k+5 网格")
     ap.add_argument("--out", default="idle_presenter", help="输出文件名前缀")
