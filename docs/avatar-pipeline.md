@@ -187,3 +187,38 @@ node my_tools/airi_cafe_check.js <avatar_id>   # 浏览器端到端：下拉/切
 - 按语义选情绪：`clips.json` 已有 `emotion` 字段，接 LLM 标签后传给调度器即可（二期）
 - 按句切音频：让每句 3~6s，与 talk 片段天然对齐，避免循环感（二期）
 
+### 二期：按语义选情绪 / 按句切音频（已实现）
+
+两个功能都由客户端逐请求携带开关（airi 设置页「LiveTalking」下两个开关，
+随每段语音上传），**不传时行为与一期完全一致**：
+
+- **按语义选情绪**：每段语音带 `emotion` 标签（airi 的 ACT 情绪信号，或
+  `/human` 传参），服务端用 `avatars/emotion.py` 的别名表归一到 clips.json
+  里真实存在的 emotion 值，talk 片段只在同情绪池里挑；匹配不上就回退全池，
+  绝不会因为情绪词不认识而没片段可播。`neutral` 及未知词 = 无偏好。
+- **按句切音频**：每句语音带唯一 `seg` 标识。同一句的所有音频帧共用一个
+  seg，seg 变化 = 句子边界，调度器在出口帧换一段 talk（动作切换落在句子
+  之间而不是句中）。airi 的 TTS 分句器本来就按标点切，clip.id 直接当 seg。
+
+接口约定（`/human` JSON / `/humanaudio` 表单字段一致）：
+
+| 字段 | 含义 |
+|---|---|
+| `emotion` | 情绪标签（happy/angry/…，别名表见 avatars/emotion.py） |
+| `seg` | 句子标识，同句相同、跨句不同 |
+| `semantic_emotion` | `'1'/'0'`，按语义选情绪开关 |
+| `sentence_split` | `'1'/'0'`，按句切音频开关 |
+
+服务端 TTS 路径（`/human` + `--tts`）在 `sentence_split` 开启时自动按句切分
+入队（`avatars/emotion.py` 的关键词规则顺带给每句粗分类情绪）；chat 模式的
+LLM 流式输出本来就按标点分段，同样逐段带 seg。
+
+验证：
+
+```bash
+# 状态机单元自测(情绪过滤/句边界/回退)
+PYTHONPATH=E:/work/LiveTalking .venv/Scripts/python.exe my_tools/clip_plan_test.py
+# 模拟 airi 链路: 逐句 edge-tts 合成 -> /humanaudio 带元数据上传 -> 核对调度日志
+PYTHONPATH= .venv/Scripts/python.exe my_tools/humanaudio_probe.py --avatar cafe_clips --semantic --sentence-split
+```
+

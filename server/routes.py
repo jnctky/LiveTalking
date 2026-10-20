@@ -5,10 +5,61 @@
 import json
 import os
 import re
+import uuid
 import asyncio
 from aiohttp import web
 
+from avatars import emotion as emo
 from utils.logger import logger
+
+
+# ─── 二期开关与多片段元数据 ──────────────────────────────────────────────
+# /human 与 /humanaudio 都可以携带这些字段, 由前端设置页的两个开关决定:
+#   semantic_emotion: 按情绪挑对话动作片段
+#   sentence_split:   按句切音频, 句边界换动作片段
+# 缺省一律 False —— 老客户端不传时行为与一期完全一致。
+
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    s = str(value).strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off", ""):
+        return False
+    return default
+
+
+def _feature_datainfo(src):
+    """从请求参数(form 或 JSON)里取出情绪/句子/开关字段。
+
+    seg 是句子标识: 同一句音频的所有帧共用一个 seg, 服务端据此判断句子边界。
+    """
+    out = {}
+    if src.get("emotion"):
+        out["emotion"] = str(src.get("emotion")).strip().lower()
+    seg = src.get("seg")
+    if seg not in (None, ""):
+        out["seg"] = str(seg)
+    for key in ("semantic_emotion", "sentence_split"):
+        if key in src:
+            out[key] = _as_bool(src.get(key), False)
+    return out
+
+
+def _with_segment(datainfo, index=None, text=None):
+    """复制 datainfo 并补一个唯一 seg; 需要时按句文本补情绪。"""
+    d = dict(datainfo)
+    base = d.get("seg") or uuid.uuid4().hex[:8]
+    d["seg"] = base if index is None else "%s-%d" % (base, index)
+    if index is not None and d.get("semantic_emotion") and not d.get("emotion"):
+        guessed = emo.classify(text)
+        if guessed:
+            d["emotion"] = guessed
+    return d
+
 
 
 # ─── 路由工具函数 ──────────────────────────────────────────────────────────
@@ -58,9 +109,19 @@ async def human(request):
         datainfo = {}
         if params.get('tts'):  # tts 参数透传（voice, emotion 等）
             datainfo['tts'] = params.get('tts')
+        datainfo.update(_feature_datainfo(params))
 
         if params['type'] == 'echo':
-            avatar_session.put_msg_txt(params['text'], datainfo)
+            text = params['text']
+            if datainfo.get('sentence_split'):
+                # 一句一段音频: 每段带唯一 seg, 服务端在句边界换动作片段
+                sents = emo.split_sentences(text)
+                logger.info('human: 按句切分 %d 段 (semantic=%s)',
+                            len(sents), datainfo.get('semantic_emotion'))
+                for i, sent in enumerate(sents):
+                    avatar_session.put_msg_txt(sent, _with_segment(datainfo, i, sent))
+            else:
+                avatar_session.put_msg_txt(text, _with_segment(datainfo))
         elif params['type'] == 'chat':
             llm_response = request.app.get("llm_response")
             if llm_response:
@@ -97,12 +158,12 @@ async def humanaudio(request):
         fileobj = form["file"]
         filebytes = fileobj.file.read()
 
-        datainfo = {}
+        datainfo = _feature_datainfo(form)
 
         avatar_session = get_session(request, sessionid)
         if avatar_session is None:
             return json_error("session not found")
-        avatar_session.put_audio_file(filebytes, datainfo)
+        avatar_session.put_audio_file(filebytes, _with_segment(datainfo) if datainfo else {})
         return json_ok()
     except Exception as e:
         logger.exception('humanaudio exception:')

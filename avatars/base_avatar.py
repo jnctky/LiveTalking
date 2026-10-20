@@ -81,6 +81,8 @@ class BaseAvatar:
         self.msgqueues = []
         # 多片段播放计划(可选): 头像包含 clips.json 时启用, 见 avatars/clip_plan.py
         self.clip_plan = None
+        # 当前句子标识(来自音频帧 userdata), 用于识别句边界
+        self._cur_seg = None
         # self.custom_opt = {}
         self.__loadcustom()
 
@@ -231,6 +233,31 @@ class BaseAvatar:
             logger.error("clip_plan 加载失败(%s): %s", meta, e)
             self.clip_plan = None
 
+    def _sync_segment(self, audio_frames):
+        """把音频帧里携带的句标识/情绪交给 clip_plan。
+
+        一句音频的所有帧共用同一个 seg, 所以 seg 变化即句子边界; 一批里只处理
+        第一个新 seg(批大小 320ms, 更细的边界等下一批)。没有 seg 的音频帧
+        (例如旧客户端、直接上传音频而不带元数据)保持一期行为。
+        """
+        if self.clip_plan is None:
+            return
+        for af in audio_frames:
+            info = af.userdata
+            if not info:
+                continue
+            seg = info.get("seg")
+            if seg is None or seg == self._cur_seg:
+                continue
+            self._cur_seg = seg
+            self.clip_plan.on_segment(
+                seg,
+                emotion=info.get("emotion"),
+                semantic=bool(info.get("semantic_emotion")),
+                sentence=bool(info.get("sentence_split")),
+            )
+            break
+
     def add_msgqueue(self, msgqueue):
         self.msgqueues.append(msgqueue)
 
@@ -367,6 +394,10 @@ class BaseAvatar:
 
              # 检测状态变化
             current_speaking = not is_all_silence
+
+            # 句边界/情绪: 每段音频的 userdata 由 /human、/humanaudio 透传
+            if self.clip_plan is not None:
+                self._sync_segment(audio_frames)
 
             if is_all_silence: #全为静音数据，只需要取fullimg，不需要推理
                 for i in range(self.batch_size):

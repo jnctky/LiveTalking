@@ -69,7 +69,7 @@ def cv2_gray(arr):
     return arr @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
 
 
-async def run(url, avatar, text, silent_s, speak_s):
+async def run(url, avatar, text, silent_s, speak_s, extra=None):
     pc = RTCPeerConnection()
     pc.addTransceiver("audio", direction="recvonly")
     pc.addTransceiver("video", direction="recvonly")
@@ -113,8 +113,9 @@ async def run(url, avatar, text, silent_s, speak_s):
     log(f"静默采样 {len(silent_win)} 帧")
 
     async with aiohttp.ClientSession() as http:
-        async with http.post(url.rstrip("/") + "/human", json={
-                "sessionid": sid, "type": "echo", "text": text}) as r:
+        body = {"sessionid": sid, "type": "echo", "text": text}
+        body.update(extra or {})
+        async with http.post(url.rstrip("/") + "/human", json=body) as r:
             log("/human ->", r.status, await r.text())
 
     # 等 TTS 首音频就绪后开始采样说话窗口
@@ -190,6 +191,18 @@ if __name__ == "__main__":
     ap.add_argument("--text", default="你好，我是你的数字人助手。今天想和你聊聊天，看看我的口型对不对。")
     ap.add_argument("--silent-seconds", type=float, default=4.0)
     ap.add_argument("--speak-seconds", type=float, default=10.0)
+    ap.add_argument("--emotion", default=None, help="情绪标签(如 happy/angry), 二期按语义选情绪")
+    ap.add_argument("--semantic-emotion", action="store_true", help="开启按语义选情绪")
+    ap.add_argument("--sentence-split", action="store_true", help="开启按句切音频")
     a = ap.parse_args()
+    extra = {}
+    if a.emotion:
+        extra["emotion"] = a.emotion
+    if a.semantic_emotion:
+        extra["semantic_emotion"] = True
+    if a.sentence_split:
+        extra["sentence_split"] = True
+    if extra:
+        log("二期参数:", extra)
     sys.exit(asyncio.get_event_loop().run_until_complete(
-        run(a.url, a.avatar, a.text, a.silent_seconds, a.speak_seconds)))
+        run(a.url, a.avatar, a.text, a.silent_seconds, a.speak_seconds, extra)))

@@ -23,11 +23,19 @@
 - 说话结束: 等当前 talk 播到出口帧 -> 回待机(片段尾部=起点帧, 硬切无感)
 - talk 播完话没完: 同洗牌袋切下一段 talk(避免同段动作重复)
 - forward-only: 帧号单调推进, 不做正反往复(mirror)
+
+二期(可选, 由调用方按请求携带的开关决定):
+- 按语义选情绪: 说话前带上 emotion 标签, talk 片段只在同情绪池里挑
+  (emotion 经 avatars/emotion.py 归一到 clips.json 真实存在的值; 匹配不上
+  就回退成无偏好, 绝不因为情绪词不认识而没片段可播)
+- 按句切音频: 每句话一段音频, 每段带唯一 seg。seg 变化 = 句子边界,
+  在出口帧换一段 talk(可同时换情绪), 使动作切换落在句子之间而不是句中
 """
 
 import json
 import random
 
+from avatars import emotion as emo
 from utils.logger import logger
 
 
@@ -72,7 +80,13 @@ class ClipPlan:
         self.pos = 0
         self._pending = None      # "idle" | 待切入的 _Clip
         self._idle_bag = []
-        self._talk_bag = []
+        self._talk_bags = {}       # emotion -> 洗牌袋(按情绪分池后各自轮播)
+        # 二期开关(由每段音频的 userdata 决定, 缺省关闭以保持一期行为)
+        self.semantic_emotion = False
+        self.sentence_split = False
+        self.want_emotion = ""      # 当前句子希望的情绪(已归一)
+        self.segment_id = None      # 当前句子标识
+        self._seg_switch = False    # 句子边界要求换一段 talk
         self._pick_idle()
         logger.info("clip_plan: %d clips (%d idle / %d talk), 从 %s 开始",
                     len(clips), len(self.idle_clips), len(self.talk_clips), self.cur.name)
@@ -88,16 +102,58 @@ class ClipPlan:
         self.cur = self._draw(self._idle_bag, self.idle_clips)
         self.pos = 0
         self.mode = "idle"
+        # 回待机即清空句子上下文: 下一句话会带来自己的情绪与 seg
+        self._seg_switch = False
+        self.want_emotion = ""
+        logger.debug("clip_plan: 待机 %s", self.cur.name)
 
-    def _choose_talk(self):
-        if not self.talk_clips:
+    def _talk_pool(self):
+        """按当前情绪过滤 talk 片段; 无匹配则回退全池。"""
+        pool = self.talk_clips
+        if not self.semantic_emotion or not self.want_emotion:
+            return pool
+        target = emo.resolve(self.want_emotion, {c.emotion for c in pool})
+        if not target:
+            logger.info("clip_plan: 情绪 '%s' 无对应片段, 回退全池", self.want_emotion)
+            return pool
+        matched = [c for c in pool if c.emotion == target]
+        return matched or pool
+
+    def _choose_talk(self, exclude=None):
+        pool = self._talk_pool()
+        if not pool:
             return None
-        return self._draw(self._talk_bag, self.talk_clips)
+        if exclude is not None and len(pool) > 1:
+            pool = [c for c in pool if c is not exclude]
+        # 按池子分别维护洗牌袋, 换情绪时不会把另一池的顺序带乱
+        key = "+".join(sorted(c.emotion for c in pool)) or "-"
+        bag = self._talk_bags.setdefault(key, [])
+        bag[:] = [c for c in bag if c in pool]   # 池子变了就丢掉失效项
+        return self._draw(bag, pool)
 
     def _enter(self, clip):
+        logger.info("clip_plan: 进入 %s (%s/%s)", clip.name, clip.type, clip.emotion or "-")
         self.cur = clip
         self.pos = 0
         self.mode = clip.type
+
+    # ---------- 句子边界 ----------
+    def on_segment(self, segment_id, emotion=None, semantic=False, sentence=False):
+        """新句子开始。segment_id 同值重复调用无副作用。
+
+        semantic: 是否按情绪挑 talk 片段
+        sentence: 是句子时, 在出口帧换一段 talk(动作切换落在句子之间)
+        """
+        if segment_id is None or segment_id == self.segment_id:
+            return
+        self.segment_id = segment_id
+        self.semantic_emotion = bool(semantic)
+        self.sentence_split = bool(sentence)
+        self.want_emotion = emo.normalize(emotion) if semantic else ""
+        if self.mode == "talk" and self.sentence_split:
+            self._seg_switch = True
+        logger.info("clip_plan: 新句子 seg=%s emotion=%s (semantic=%s sentence=%s)",
+                    segment_id, self.want_emotion or "-", semantic, sentence)
 
     # ---------- 调度 ----------
     def advance(self, speaking):
@@ -117,6 +173,7 @@ class ClipPlan:
             if self._pending is not None and self.pos >= self.cur.exit:
                 self._enter(self._pending)
                 self._pending = None
+                self._seg_switch = False
         elif self.mode == "talk" and not speaking:
             # 说话结束: 等当前 talk 播到出口帧后回待机
             if self._pending is None:
@@ -124,13 +181,24 @@ class ClipPlan:
             if self.pos >= self.cur.exit:
                 self._pick_idle()
                 self._pending = None
+        elif self.mode == "talk" and speaking and self._seg_switch:
+            # 新句子: 换一段 talk(情绪可能变了), 同样等到出口帧再切
+            if self._pending is None:
+                self._pending = self._choose_talk(exclude=self.cur)
+            if self._pending is not None and self.pos >= self.cur.exit:
+                self._enter(self._pending)
+                self._pending = None
+                self._seg_switch = False
 
     def _on_end(self, speaking):
         if self.mode == "idle":
             self._pick_idle()
         else:
-            nxt = self._choose_talk()
+            nxt = self._choose_talk(exclude=self.cur)
             if nxt is None:
                 self._pick_idle()
             else:
                 self._enter(nxt)
+                # 换段即满足句子边界的诉求
+                self._seg_switch = False
+                self._pending = None

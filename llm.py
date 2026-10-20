@@ -1,5 +1,6 @@
 import time
 import os
+import uuid
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from avatars.base_avatar import BaseAvatar
@@ -50,6 +51,26 @@ def llm_response(message,avatar_session:'BaseAvatar',datainfo:dict={}):
         model = _llm_model(opt)
         end = time.perf_counter()
         logger.info(f"llm Time init: {end-start}s,{message}")
+        # 按句切音频时, 每个片段要有唯一 seg, 服务端据此判断句子边界
+        split = bool(datainfo.get('sentence_split'))
+        base_seg = datainfo.get('seg') or uuid.uuid4().hex[:8]
+        seg_seq = 0
+
+        def _emit(text):
+            nonlocal seg_seq
+            if split:
+                seg_seq += 1
+                info = dict(datainfo)
+                info['seg'] = "%s-%d" % (base_seg, seg_seq)
+                if info.get('semantic_emotion') and not info.get('emotion'):
+                    from avatars import emotion as emo
+                    guessed = emo.classify(text)
+                    if guessed:
+                        info['emotion'] = guessed
+                avatar_session.put_msg_txt(text, info)
+            else:
+                avatar_session.put_msg_txt(text, datainfo)
+
         completion = client.chat.completions.create(
             model=model,
             messages=[{'role': 'system', 'content': '你是一个知识助手，尽量以简短、口语化的方式输出'},
@@ -78,13 +99,13 @@ def llm_response(message,avatar_session:'BaseAvatar',datainfo:dict={}):
                         lastpos = i+1
                         if len(result)>10:
                             logger.info(result)
-                            avatar_session.put_msg_txt(result,datainfo)
+                            _emit(result)
                             result=""
                 result = result+msg[lastpos:]
         end = time.perf_counter()
         logger.info(f"llm Time to last chunk: {end-start}s")
         if result:
-            avatar_session.put_msg_txt(result,datainfo)
+            _emit(result)
 
     except Exception as e:
         logger.exception('llm exceptiopn:')
