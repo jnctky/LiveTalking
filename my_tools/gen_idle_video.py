@@ -20,6 +20,7 @@ IMG_NAME = "presenter_idle_base.png"
 W, H = 864, 1152          # 3:4 portrait
 LENGTH = 124              # 17k+5 网格, ~5.17s @24fps
 SEED = 20261018
+FPS = 24
 
 # anim 版（原样保留）：只有呼吸/眨眼/极小幅头部动作
 PROMPT_ANIM = (
@@ -82,7 +83,11 @@ PROMPT_LEAN = _BASE + (
 
 PROMPTS.update({"nod": PROMPT_NOD, "lean": PROMPT_LEAN})
 
-def prepare_image(src=SRC):
+def prepare_image(src=SRC, out_w=None, out_h=None, name=None):
+    global W, H, IMG_NAME
+    if out_w: W = out_w
+    if out_h: H = out_h
+    if name: IMG_NAME = name
     img = cv2.imread(src, cv2.IMREAD_UNCHANGED)
     assert img is not None, f"读不到源图 {src}"
     if img.shape[2] == 4:
@@ -160,6 +165,9 @@ def main():
     ap.add_argument("--length", type=int, default=LENGTH, help="帧数, 需满足 17k+5 网格")
     ap.add_argument("--out", default="idle_presenter", help="输出文件名前缀")
     ap.add_argument("--image", default=SRC, help="底图路径（建议 3:4 竖构图, 脸高占画面 20-70%%）")
+    ap.add_argument("--width", type=int, default=W, help="输出宽（保持 3:4 比例，如 768x1024）")
+    ap.add_argument("--height", type=int, default=H, help="输出高")
+    ap.add_argument("--img-name", default=IMG_NAME, help="写入 ComfyUI input 的底图文件名（批量时需唯一）")
     ap.add_argument("--prompt-file", default=None,
                     help="从文件读动作提示词（纯文本, 覆盖 --style）")
     ap.add_argument("--resume", action="store_true")
@@ -175,8 +183,8 @@ def main():
     if (args.length - 5) % 17 != 0:
         raise SystemExit("length 需满足 17k+5 网格约束 (如 124=17*7+5, 158=17*9+5), 得到 %d" % args.length)
     ARGS = args
-    print("style=%s seed=%d length=%d out=%s" % (args.style, args.seed, args.length, args.out))
-    prepare_image(args.image)
+    print("style=%s seed=%d length=%d out=%s size=%dx%d" % (args.style, args.seed, args.length, args.out, args.width, args.height))
+    prepare_image(args.image, args.width, args.height, args.img_name)
     graph = build_graph()
     try:
         r = http_json("/prompt", {"prompt": graph, "client_id": "livetalking-idle"})

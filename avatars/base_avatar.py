@@ -79,6 +79,8 @@ class BaseAvatar:
         self.custom_audio_index = {}
         self.custom_index = {}
         self.msgqueues = []
+        # 多片段播放计划(可选): 头像包含 clips.json 时启用, 见 avatars/clip_plan.py
+        self.clip_plan = None
         # self.custom_opt = {}
         self.__loadcustom()
 
@@ -215,6 +217,19 @@ class BaseAvatar:
             self.custom_audio_index[key] = 0
         for key in self.custom_index:
             self.custom_index[key] = 0
+
+    def load_clip_plan(self, avatar_path):
+        """头像包带 clips.json 时启用多片段调度; 失败则回退单序列循环。"""
+        import os as _os
+        meta = _os.path.join(avatar_path, "clips.json")
+        if not _os.path.exists(meta):
+            return
+        try:
+            from avatars.clip_plan import ClipPlan
+            self.clip_plan = ClipPlan(meta)
+        except Exception as e:
+            logger.error("clip_plan 加载失败(%s): %s", meta, e)
+            self.clip_plan = None
 
     def add_msgqueue(self, msgqueue):
         self.msgqueues.append(msgqueue)
@@ -355,15 +370,22 @@ class BaseAvatar:
 
             if is_all_silence: #全为静音数据，只需要取fullimg，不需要推理
                 for i in range(self.batch_size):
-                    idx = mirror_index(length, index)
+                    if self.clip_plan is not None:
+                        idx = self.clip_plan.advance(False)
+                    else:
+                        idx = mirror_index(length, index)
+                        index = index + 1
                     self.res_frame_queue.put((None, audio_frames[i*2:i*2+2], idx))
-                    index = index + 1
             else:
                 if current_speaking and not last_speaking and self.custom_index.get(1) is not None: #从静音到说话切换,并且有自定义静态视频
                     index = 0
                 t = time.perf_counter()
 
-                pred = self.inference_batch(index, audiofeat_batch)
+                idxs = None
+                if self.clip_plan is not None:
+                    # 多片段模式: 先分配本批帧号(调度器可能在此切换片段)
+                    idxs = [self.clip_plan.advance(current_speaking) for _ in range(self.batch_size)]
+                pred = self.inference_batch(idxs if idxs is not None else index, audiofeat_batch)
 
                 counttime += (time.perf_counter() - t)
                 count += self.batch_size
@@ -372,8 +394,12 @@ class BaseAvatar:
                     count = 0
                     counttime = 0
                 for i, res_frame in enumerate(pred):
-                    self.res_frame_queue.put((res_frame, audio_frames[i*2:i*2+2], mirror_index(length, index)))
-                    index = index + 1
+                    if idxs is not None:
+                        idx = idxs[i]
+                    else:
+                        idx = mirror_index(length, index)
+                        index = index + 1
+                    self.res_frame_queue.put((res_frame, audio_frames[i*2:i*2+2], idx))
                     
             if current_speaking != last_speaking:
                 logger.info(f"inference 状态切换：{'说话' if last_speaking else '静音'} → {'说话' if current_speaking else '静音'}")

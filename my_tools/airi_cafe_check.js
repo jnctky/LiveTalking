@@ -1,10 +1,10 @@
-/* 验证 cafe_presenter 已进入 airi 头像下拉, 切换后视频流可用、服务端会话切到该头像 */
+/* 验证 cafe_clips 已进入 airi 头像下拉, 切换后视频流可用、服务端会话切到该头像 */
 const { chromium } = require('E:/work/airi/node_modules/playwright')
 
 const APP = 'http://localhost:5173'
 const API = 'http://127.0.0.1:8010'
 const CHROME = 'C:/Users/pc/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe'
-const TARGET = 'cafe_presenter'
+const TARGET = 'cafe_clips'
 const SHOT = 'E:/work/LiveTalking/my_tools/image/'
 
 const nuke = page => page.evaluate(() => {
@@ -57,7 +57,7 @@ async function waitServerAvatar(id, ms = 20000) {
     localStorage.removeItem('settings/livetalking/avatar')
   })
 
-  // ---- 1. 设置页下拉里是否出现 cafe_presenter ----
+  // ---- 1. 设置页下拉里是否出现 cafe_clips ----
   await page.goto(APP + '/settings/models', { waitUntil: 'networkidle' })
   await page.waitForTimeout(2500)
   await nuke(page)
@@ -73,9 +73,9 @@ async function waitServerAvatar(id, ms = 20000) {
   const inList = options.some(o => (o || '').includes(TARGET))
   console.log(`[1] 下拉选项 ${options.length} 个, 含 ${TARGET}: ${inList ? '✅' : '❌'}`)
   console.log('    ', JSON.stringify(options))
-  if (!inList) fails.push('dropdown missing cafe_presenter')
+  if (!inList) fails.push('dropdown missing cafe_clips')
 
-  // ---- 2. 点选 cafe_presenter ----
+  // ---- 2. 点选 cafe_clips ----
   if (inList) {
     const opt = page.locator('[role="option"]', { hasText: TARGET }).first()
     await opt.click()

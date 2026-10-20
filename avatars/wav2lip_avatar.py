@@ -112,14 +112,21 @@ class LipReal(BaseAvatar):
 
         self.asr = MelASR(opt,self)
         self.asr.warm_up()
-    
+
+        # 多片段播放计划(可选): 头像包含 clips.json 时启用
+        _aid = getattr(self.opt, 'avatar_id', None)
+        if _aid:
+            self.load_clip_plan(f"./data/avatars/{_aid}")
+
     def inference_batch(self, index, audiofeat_batch):
-        # 这里的 index 是针对当前 avatar 的索引
-        # 返回一个 batch 的推理结果，batch 大小由 self.batch_size 决定
+        # index: int(单序列循环起点) 或 list[int](clip_plan 预分配的全局帧号)
         length = len(self.face_list_cycle)
+        if isinstance(index, (list, tuple)):
+            idx_list = list(index)
+        else:
+            idx_list = [mirror_index(length, index + i) for i in range(self.batch_size)]
         img_batch = []
-        for i in range(self.batch_size):
-            idx = mirror_index(length, index + i)
+        for idx in idx_list:
             face = self.face_list_cycle[idx]
             img_batch.append(face)
         img_batch, audiofeat_batch = np.asarray(img_batch), np.asarray(audiofeat_batch)
