@@ -24,5 +24,10 @@ dist
 .venv/
 my_tools/
 
+# my_tools 的产物单独标记：日志与素材各自归目录，明确不随代码入库
+# （即使将来放开 my_tools/ 让脚本入库，这两类仍然忽略）
+my_tools/log/
+my_tools/image/
+
 # 人脸检测权重（约 86MB，第三方权重，不入库；下载与校验见 docs/model-weights.md）
 s3fd*.pth
