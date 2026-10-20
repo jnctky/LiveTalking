@@ -82,9 +82,9 @@ PROMPT_LEAN = _BASE + (
 
 PROMPTS.update({"nod": PROMPT_NOD, "lean": PROMPT_LEAN})
 
-def prepare_image():
-    img = cv2.imread(SRC, cv2.IMREAD_UNCHANGED)
-    assert img is not None, f"读不到源图 {SRC}"
+def prepare_image(src=SRC):
+    img = cv2.imread(src, cv2.IMREAD_UNCHANGED)
+    assert img is not None, f"读不到源图 {src}"
     if img.shape[2] == 4:
         a = img[:, :, 3:4].astype(np.float32) / 255.0
         rgb = img[:, :, :3].astype(np.float32)
@@ -159,14 +159,24 @@ def main():
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--length", type=int, default=LENGTH, help="帧数, 需满足 17k+5 网格")
     ap.add_argument("--out", default="idle_presenter", help="输出文件名前缀")
+    ap.add_argument("--image", default=SRC, help="底图路径（建议 3:4 竖构图, 脸高占画面 20-70%%）")
+    ap.add_argument("--prompt-file", default=None,
+                    help="从文件读动作提示词（纯文本, 覆盖 --style）")
     ap.add_argument("--resume", action="store_true")
     args = ap.parse_args()
-    args.prompt = PROMPTS[args.style]
+    if args.prompt_file:
+        with open(args.prompt_file, "r", encoding="utf-8") as f:
+            args.prompt = f.read().strip()
+        if not args.prompt:
+            raise SystemExit("prompt 文件为空: %s" % args.prompt_file)
+        print("prompt 来自文件:", args.prompt_file, "(%d 字符)" % len(args.prompt))
+    else:
+        args.prompt = PROMPTS[args.style]
     if (args.length - 5) % 17 != 0:
         raise SystemExit("length 需满足 17k+5 网格约束 (如 124=17*7+5, 158=17*9+5), 得到 %d" % args.length)
     ARGS = args
     print("style=%s seed=%d length=%d out=%s" % (args.style, args.seed, args.length, args.out))
-    prepare_image()
+    prepare_image(args.image)
     graph = build_graph()
     try:
         r = http_json("/prompt", {"prompt": graph, "client_id": "livetalking-idle"})
