@@ -27,21 +27,41 @@ def log(*a):
     print(*a, flush=True)
 
 
-def mouth_diffs(frames, window=None):
-    """嘴部(脸中下窗口)帧间灰度差。window=(y0,y1,x0,x1) 比例。"""
-    if window is None:
-        window = (0.40, 0.56, 0.38, 0.60)
+def mouth_diffs(frames, box=None):
+    """嘴部帧间灰度差。box=(y0,y1,x0,x1) 绝对像素(来自头像 coords); 缺省退回比例窗口。"""
     diffs, prev = [], None
     for f in frames:
         arr = np.asarray(f.to_image().convert("RGB"), dtype=np.int16)
         h, w = arr.shape[:2]
-        y0, y1, x0, x1 = window
-        m = arr[int(h*y0):int(h*y1), int(w*x0):int(w*x1)]
+        if box is not None:
+            y0, y1, x0, x1 = box
+        else:
+            y0, y1, x0, x1 = int(h*0.40), int(h*0.56), int(w*0.38), int(w*0.60)
+        m = arr[y0:y1, x0:x1]
         g = cv2_gray(m)
         if prev is not None:
             diffs.append(float(np.abs(g - prev).mean()))
         prev = g
     return diffs
+
+
+def load_mouth_box(avatar):
+    """从头像包 coords.pkl 取中位脸框, 推嘴部窗口 (y0,y1,x0,x1) 绝对像素。
+
+    原因: 固定比例窗口只适合"脸居中占满"的旧素材; T2V 等新构图的窗口会落到
+    衬衫上, 测出 ratio≈1.0 的假阴性。coords 是逐帧脸框, 中位数即稳态位置。"""
+    p = os.path.join(ROOT, "data", "avatars", avatar, "coords.pkl")
+    if not os.path.exists(p):
+        log("!! 找不到 %s, 退回比例窗口" % p)
+        return None
+    import pickle
+    a = np.array(pickle.load(open(p, "rb")), dtype=float)
+    y1, y2 = float(np.median(a[:, 0])), float(np.median(a[:, 1]))
+    x1, x2 = float(np.median(a[:, 2])), float(np.median(a[:, 3]))
+    h, w = y2 - y1, x2 - x1
+    box = (int(y1 + 0.52*h), int(y1 + 0.92*h), int(x1 + 0.22*w), int(x1 + 0.78*w))
+    log("嘴部窗口(来自 coords): %s" % (box,))
+    return box
 
 
 def cv2_gray(arr):
@@ -112,8 +132,9 @@ async def run(url, avatar, text, silent_s, speak_s):
         pass
     await pc.close()
 
-    sd = mouth_diffs(silent_win)
-    sp = mouth_diffs(speak_win)
+    mbox = load_mouth_box(avatar)
+    sd = mouth_diffs(silent_win, mbox)
+    sp = mouth_diffs(speak_win, mbox)
     out = {}
     if sd:
         out["silent"] = (float(np.mean(sd)), float(np.max(sd)))
@@ -137,8 +158,12 @@ async def run(url, avatar, text, silent_s, speak_s):
         tiles = []
         for f in win[::5]:
             arr = np.asarray(f.to_image().convert("RGB"))
-            h, w = arr.shape[:2]
-            m = arr[int(h*0.38):int(h*0.62), int(w*0.34):int(w*0.66)]
+            if mbox is not None:
+                y0, y1, x0, x1 = mbox
+                m = arr[y0:y1, x0:x1]
+            else:
+                h, w = arr.shape[:2]
+                m = arr[int(h*0.38):int(h*0.62), int(w*0.34):int(w*0.66)]
             tiles.append(cv2_resize(m, (150, 120)))
         if tiles:
             strip = np.concatenate(tiles, axis=1)[:, :, ::-1]

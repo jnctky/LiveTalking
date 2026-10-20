@@ -79,7 +79,32 @@ The first and last frames are identical for seamless looping.
 
 ---
 
-## 三、直接跑生成
+## 三、纯 T2V 一步出片（无底图）
+
+没有角色照片时，把「人物 + 场景 + 构图 + 光线 + 动作」合并成一段提示词直接 T2V，
+已验证可行（`MiniMaxH3ImageToVideo` 不接 first/last frame 即纯文本条件）：
+
+```bash
+PYTHONPATH= .venv/Scripts/python.exe my_tools/gen_video_t2v.py \
+  --prompt-file my_tools/prompt_cafe_presenter_t2v.txt \
+  --width 864 --height 1152 --length 124 --seed 20261020 --out cafe_t2v_idle
+```
+
+配套提示词：`my_tools/prompt_cafe_presenter_t2v.txt`（= 底图的人物/服装/场景/光线
++ 动作段 + **显式构图指令**）。
+
+T2V 的两个硬经验（冒烟测试实测）：
+
+1. **构图指令必须显式写**（"medium shot from head to mid-thigh, face fills about one
+   third of the frame height"）。不写的话模型自由发挥成全身景，脸高只有画面 13%，
+   crop 后嘴像素不足以做口型（预检 [!] 脸太小）。
+2. **seed 决定角色长相**：同一提示词换 seed 就是另一个人。想固定角色就固定 seed；
+   想做同一角色的多段动作组，用 T2V 出片后**截一帧当底图转 I2V**（prompt_cafe_presenter.md
+   第一、二节的流程），不要再 T2V。
+
+---
+
+## 四、I2V 直接跑生成（有底图时）
 
 底图存好后（建议 3:4，长边 ≥1024）：
 
@@ -110,7 +135,7 @@ PYTHONPATH= .venv/Scripts/python.exe my_tools/lipsync_ab_test.py --avatar cafe_p
 
 ---
 
-## 四、验收标准（逐条对）
+## 五、验收标准（逐条对）
 
 | 项目 | 达标线 |
 |---|---|
