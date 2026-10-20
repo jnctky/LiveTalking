@@ -116,3 +116,74 @@ PYTHONPATH= .venv/Scripts/python.exe my_tools/lipsync_test.py --avatar <avatar_i
 - `POST /offer` body 里带 `"avatar": "<id>"` 即按该头像建会话（不传则用 `--avatar_id`）
 
 airi 侧在「设置 → 角色模型 → LiveTalking → 头像」下拉里选择。
+
+## 八、多片段头像（多动作组）
+
+单条长序列循环看久了会有明显的周期感。多片段方案把「一个待机循环」升级为
+「一组可互切的短动作」，静默时轮播、说话时切到对话动作，口型始终由语音驱动。
+
+**核心约定：所有片段的首尾帧都是同一个「起点帧」。** 这让片段之间可以硬切
+（起止姿态完全一致，观感上就是"动作接动作"），也让 coords 在段边界几乎连续
+（实测拼接后段边界坐标变化 ≤1px，贴回不跳位）。
+
+| 片段类型 | 时长 | 帧数（24fps 生成） | 内容要求 |
+|---|---|---|---|
+| `idle` 待机 | 2~3s | 56（17k+5 网格） | 呼吸/眨眼/微侧倾/手指小动作，幅度小 |
+| `talk` 对话 | 5~6s | 124 | 情绪靠身体/头/眉眼表达，**嘴保持闭合** |
+
+为什么 talk 片段嘴也要闭合：静默期服务端直接显示素材原帧不推理，说话期嘴部
+由 wav2lip 重绘。素材本身在说话会导致"无声张嘴"和口型糊掉。
+
+### 生成流程
+
+```bash
+# 1) 定义片段：编辑 my_tools/clips_v1.py（BASE 人物场景 + 每段 motion + length）
+#    起点帧取自动作素材的第 0 帧，建议放 my_tools/image/clips/_anchor.png
+# 2) 批量生成（每段是一段首尾同帧的 I2V，同 seed 保证人物一致）
+PYTHONPATH= .venv/Scripts/python.exe my_tools/gen_clip_set.py
+# 3) 拼接 → genavatar → 写 clips.json
+PYTHONPATH= .venv/Scripts/python.exe my_tools/build_clip_avatar.py --avatar-id <avatar_id>
+```
+
+`build_clip_avatar.py` 会自动算每段的**出口帧**（exit）：动作已回到中性、可安全
+切出的位置。idle 片段动作幅度小、差异曲线全程低，固定取 60%；talk 片段按与起点帧
+的差异曲线取尾部回归点（实测约 65%）。
+
+### clips.json 与播放规则
+
+`data/avatars/<id>/clips.json`（由 build 脚本生成，不要手改帧号）：
+
+```json
+{"fps": 25, "forward_only": true,
+ "clips": [{"name": "idle_a", "type": "idle", "start": 0, "end": 56, "exit": 33},
+           {"name": "talk_warm_a", "type": "talk", "emotion": "warm",
+            "start": 168, "end": 292, "exit": 248}]}
+```
+
+`start`/`end`/`exit` 都是拼接后的全局帧号。调度器在 `avatars/clip_plan.py`：
+
+- **静默**：待机片段洗牌袋轮播，一段播完才换，不会连续重复
+- **说话开始**：等当前待机播到出口帧再切进 talk（延迟 ≤ 约 1.3s，比"必须播完整段"短）
+- **说话结束**：talk 播到出口帧后回待机（已过出口帧则立即切）
+- **话比片段长**：talk 播完自动换同池下一段，避免同一动作重复
+- **forward-only**：帧号单调推进，不再正反往复（倒放会让点头变抬头）
+
+没有 clips.json 的头像行为完全不变（老的 `mirror_index` 循环）。
+
+### 验证
+
+```bash
+# 口型 A/B（静默基线 vs 说话，条带图目检开合节奏）
+PYTHONPATH= .venv/Scripts/python.exe my_tools/lipsync_ab_test.py --avatar <avatar_id> --speak-seconds 12
+node my_tools/airi_cafe_check.js <avatar_id>   # 浏览器端到端：下拉/切换/视频流/播放帧
+```
+
+多片段素材的静默底噪很低，A/B 的 ratio 通常 ≥10x（单序列约 1.5~2x），
+出现异常低值先怀疑测量（嘴部窗口是否落在嘴上）。
+
+### 扩展方向
+
+- 加片段：往 `clips_v1.py` 追加条目 → 重跑 gen_clip_set（只生成新增的，用 `--only`）→ 重跑 build
+- 按语义选情绪：`clips.json` 已有 `emotion` 字段，接 LLM 标签后传给调度器即可（二期）
+- 按句切音频：让每句 3~6s，与 talk 片段天然对齐，避免循环感（二期）
+
