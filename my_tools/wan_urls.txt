@@ -1,0 +1,12 @@
+https://hf-mirror.com/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors
+  dir=D:/work/AI/ComfyUI/models/diffusion_models
+  out=wan2.2_ti2v_5B_fp16.safetensors
+  checksum=sha-256=456f901338bd9eadbded3828b819109a9b68e8a525ca5cf8d0049a69fcfeca1e
+https://hf-mirror.com/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors
+  dir=D:/work/AI/ComfyUI/models/text_encoders
+  out=umt5_xxl_fp8_e4m3fn_scaled.safetensors
+  checksum=sha-256=c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68
+https://hf-mirror.com/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors
+  dir=D:/work/AI/ComfyUI/models/VAE
+  out=wan2.2_vae.safetensors
+  checksum=sha-256=e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156

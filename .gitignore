@@ -20,15 +20,15 @@ models/
 *.log
 dist
 
-# 本地环境与自写工具（不入库）
+# 本地环境（不入库）
 .venv/
-my_tools/
 
-# my_tools 的产物单独标记：日志、素材、临时文件各自归目录，明确不随代码入库
-# （即使将来放开 my_tools/ 让脚本入库，这三类仍然忽略）
+# my_tools：根目录的自写脚本与文档随仓库同步（便于复现/交接）
+# 只有三个产物目录不入库：日志 / 素材 / 临时文件
 my_tools/log/
 my_tools/image/
 my_tools/_tmp/
+my_tools/__pycache__/
 
 # 人脸检测权重（约 86MB，第三方权重，不入库；下载与校验见 docs/model-weights.md）
 s3fd*.pth
